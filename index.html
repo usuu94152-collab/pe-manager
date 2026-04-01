@@ -647,6 +647,12 @@ tbody td { padding: 6px 12px; }
     </div>
     <div style="font-size:11px;color:var(--text3);margin-bottom:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;">전체 학생 현황</div>
     <div class="stu-grid" id="stuGrid"></div>
+    <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border);">
+      <button onclick="syncAttendanceToSheet()" id="btnSyncAtt"
+        style="width:100%;padding:13px;background:rgba(52,168,83,0.12);border:1px solid rgba(52,168,83,0.35);border-radius:11px;color:#4ade80;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px;">
+        <span>📊</span> 구글 시트에 출결 저장
+      </button>
+    </div>
   </div>
 </main>
 </div>
@@ -762,6 +768,10 @@ tbody td { padding: 6px 12px; }
         <button class="btn-ghost" id="btnAgain">🔀 다시 편성하기</button>
         <button class="btn-excel" id="btnDownload">⬇️ 엑셀 다운로드</button>
       </div>
+      <button onclick="syncPairsToSheet()" id="btnSyncPairs"
+        style="width:100%;margin-top:10px;padding:13px;background:rgba(52,168,83,0.12);border:1px solid rgba(52,168,83,0.35);border-radius:11px;color:#4ade80;font-size:14px;font-weight:800;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px;">
+        <span>📊</span> 구글 시트에 짝편성 저장
+      </button>
     </div>
   </div>
 </main>
@@ -1855,6 +1865,92 @@ $('prevPairs').addEventListener('input',()=>{
   const p=parsePrevPairs($('prevPairs').value);
   $('prevCnt').textContent=p.length>0?`✓ ${p.length}쌍 인식됨`:'';
 });
+
+
+// ════════════════════════════════════════
+//  구글 시트 연동
+// ════════════════════════════════════════
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbz3jtacebYjTpWOOQ-N9g9AoRxJTpUDAEOAgOKjzeGSGkb0vzyYa57swttl8IfvDBW3cQ/exec';
+
+// 로딩 상태 표시
+function setBtnLoading(id, loading) {
+  const btn = $(id); if (!btn) return;
+  if (loading) {
+    btn.dataset.orig = btn.innerHTML;
+    btn.innerHTML = '<span class="spinner"></span> 저장 중...';
+    btn.disabled = true;
+  } else {
+    btn.innerHTML = btn.dataset.orig || btn.innerHTML;
+    btn.disabled = false;
+  }
+}
+
+// 출결 → 구글 시트 저장
+async function syncAttendanceToSheet() {
+  const cn = $('overviewClassPicker').value;
+  if (!cn) { toast('⚠️ 학급을 먼저 선택하세요'); return; }
+  const db = loadClassDB(); const cls = db[cn]; if (!cls) return;
+  const attMap = getAttForClass(cn);
+
+  // 오늘 날짜
+  const today = new Date().toLocaleDateString('ko-KR', {month:'short', day:'numeric'});
+
+  const records = cls.students.map(s => {
+    const a = attMap[s.id];
+    return {
+      no:   s.id,
+      name: s.name,
+      status: a ? a.status : 'present',
+      by:   a ? (a.by || '') : '',
+      time: a ? (a.time || '') : ''
+    };
+  });
+
+  setBtnLoading('btnSyncAtt', true);
+  try {
+    const res = await fetch(GAS_URL, {
+      method: 'POST',
+      body: JSON.stringify({
+        type: 'attendance',
+        date: today,
+        className: classFull(cn),
+        records
+      })
+    });
+    const json = await res.json();
+    if (json.ok) toast('✅ 구글 시트에 출결 저장 완료!');
+    else toast('❌ 저장 실패: ' + (json.error || ''));
+  } catch (e) {
+    toast('❌ 네트워크 오류. 와이파이를 확인하세요.');
+  }
+  setBtnLoading('btnSyncAtt', false);
+}
+
+// 짝편성 → 구글 시트 저장
+async function syncPairsToSheet() {
+  if (!lastTeams || !lastTeams.length) { toast('⚠️ 먼저 짝 편성을 실행하세요'); return; }
+  const today = new Date().toLocaleDateString('ko-KR', {month:'short', day:'numeric'});
+
+  setBtnLoading('btnSyncPairs', true);
+  try {
+    const res = await fetch(GAS_URL, {
+      method: 'POST',
+      body: JSON.stringify({
+        type: 'pairs',
+        date: today,
+        className: classFull(lastAssignCn),
+        teams: lastTeams,
+        groupSize: assignGroupSize
+      })
+    });
+    const json = await res.json();
+    if (json.ok) toast('✅ 구글 시트에 짝편성 저장 완료!');
+    else toast('❌ 저장 실패: ' + (json.error || ''));
+  } catch (e) {
+    toast('❌ 네트워크 오류. 와이파이를 확인하세요.');
+  }
+  setBtnLoading('btnSyncPairs', false);
+}
 
 // 초기화
 populateClassPickers();
