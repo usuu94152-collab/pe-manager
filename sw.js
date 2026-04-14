@@ -1,5 +1,5 @@
 // ─── 체육수업 통합 관리 Service Worker ───
-const CACHE_NAME = 'pe-manager-v1';
+const CACHE_NAME = 'pe-manager-v2';
 
 // 캐시할 파일 목록
 const CACHE_FILES = [
