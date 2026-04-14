@@ -1,30 +1,20 @@
 // ─── 체육수업 통합 관리 Service Worker ───
 const CACHE_NAME = 'pe-manager-v2';
 
-// 캐시할 파일 목록
-const CACHE_FILES = [
-  './',
-  './index.html',
+// 캐시할 정적 자산 (거의 바뀌지 않는 파일)
+const STATIC_ASSETS = [
   './manifest.json',
   './icon-192.png',
   './icon-512.png',
-  'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js',
-  'https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800;900&family=Black+Han+Sans&display=swap'
+  'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'
 ];
 
-// 설치: 필수 파일 캐싱
+// 설치: 정적 자산만 캐싱 (index.html은 항상 네트워크에서)
 self.addEventListener('install', event => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => {
-      // 외부 리소스는 실패해도 계속 진행
-      return cache.addAll(['./index.html', './manifest.json'])
-        .then(() => {
-          return Promise.allSettled(
-            ['https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js']
-              .map(url => cache.add(url).catch(() => {}))
-          );
-        });
-    }).then(() => self.skipWaiting())
+    caches.open(CACHE_NAME).then(cache =>
+      Promise.allSettled(STATIC_ASSETS.map(url => cache.add(url).catch(() => {})))
+    ).then(() => self.skipWaiting())
   );
 });
 
@@ -39,28 +29,42 @@ self.addEventListener('activate', event => {
   );
 });
 
-// 요청 가로채기: 캐시 우선 → 네트워크 폴백
+// 요청 가로채기
 self.addEventListener('fetch', event => {
-  // POST 등 캐시 불가 요청은 그냥 통과
   if (event.request.method !== 'GET') return;
 
-  event.respondWith(
-    caches.match(event.request).then(cached => {
-      if (cached) return cached;
+  const url = new URL(event.request.url);
+  const isHTML = event.request.destination === 'document' ||
+                 url.pathname.endsWith('.html') ||
+                 url.pathname === '/' ||
+                 url.pathname.endsWith('/');
 
-      return fetch(event.request)
+  if (isHTML) {
+    // HTML: 네트워크 우선 → 실패 시 캐시 (항상 최신 화면 제공)
+    event.respondWith(
+      fetch(event.request)
         .then(response => {
-          // 유효한 응답만 캐시에 저장
-          if (response && response.status === 200 && response.type !== 'opaque') {
+          if (response && response.status === 200) {
             const clone = response.clone();
             caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
           }
           return response;
         })
-        .catch(() => {
-          // 오프라인 & 캐시 없음 → index.html 반환
-          return caches.match('./index.html');
-        });
-    })
-  );
+        .catch(() => caches.match(event.request).then(c => c || caches.match('./index.html')))
+    );
+  } else {
+    // 정적 자산: 캐시 우선 → 네트워크 폴백
+    event.respondWith(
+      caches.match(event.request).then(cached => {
+        if (cached) return cached;
+        return fetch(event.request).then(response => {
+          if (response && response.status === 200 && response.type !== 'opaque') {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+          }
+          return response;
+        }).catch(() => caches.match('./index.html'));
+      })
+    );
+  }
 });
